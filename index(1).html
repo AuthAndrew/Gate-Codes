@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gate Codes">
+<title>Gate Codes</title>
+<style>
+:root{--bg:#f3f4f6;--card:#fff;--tx:#12161b;--mu:#667085;--ac:#0a66d6;--bd:#dde1e7;--dg:#c62828;--acb:#e6f0fd;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1014;--card:#171b21;--tx:#eef1f5;--mu:#98a2b3;--ac:#5aa2ff;--bd:#2a313b;--dg:#ff6b6b;--acb:#16263d;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0d1014;--card:#171b21;--tx:#eef1f5;--mu:#98a2b3;--ac:#5aa2ff;--bd:#2a313b;--dg:#ff6b6b;--acb:#16263d;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:17px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+#app{max-width:560px;margin:0 auto;padding:14px 16px 40px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;min-height:44px}
+h1{font-size:24px;margin:6px 0 2px}
+.sub{color:var(--mu);font-size:14px;margin:0 0 14px}
+button{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;cursor:pointer}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600}
+button.d{color:var(--dg)}
+button.link{border:0;background:none;color:var(--ac);padding:8px 4px;font-weight:600}
+.row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.item{width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;padding:16px;font-size:18px;margin-bottom:8px}
+.item small{color:var(--mu);font-size:14px}
+.here{background:var(--acb);border-color:var(--ac);padding:14px;border-radius:12px;margin-bottom:14px;font-size:15px}
+input,textarea{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:11px;width:100%;min-width:0}
+.box{background:var(--card);border:1px dashed var(--bd);border-radius:12px;padding:12px;margin:14px 0}
+.box h3{margin:0 0 8px;font-size:15px;color:var(--mu)}
+.code{font:700 64px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;letter-spacing:4px;word-break:break-all;margin:18px 0}
+.big{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:22px 14px;text-align:center}
+.lbl{color:var(--mu);font-size:15px}
+.msg{color:var(--dg);font-size:14px;margin-bottom:8px}
+.empty{color:var(--mu);text-align:center;padding:18px 0}
+</style></head>
+<body><div id="app"></div>
+<script>
+const K='gatecodes.v1';
+let db={airports:[]},S={a:null,t:null,g:null},edit=false,near=null,msg='',busy=false,auto=true,delArm=null,q='',partial=false;
+try{const r=localStorage.getItem(K);if(r)db=JSON.parse(r)}catch(e){}
+const idb=()=>new Promise((res,rej)=>{try{const q=indexedDB.open('gatecodes',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)}catch(e){rej(e)}});
+const idbPut=async v=>{const d=await idb();return new Promise((res,rej)=>{const t=d.transaction('kv','readwrite');t.objectStore('kv').put(v,K);t.oncomplete=res;t.onerror=()=>rej(t.error)})};
+const idbGet=async()=>{const d=await idb();return new Promise((res,rej)=>{const q=d.transaction('kv').objectStore('kv').get(K);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})};
+let dirty=false;try{dirty=localStorage.getItem(K+'.d')==='1'}catch(e){}
+const setDirty=v=>{dirty=v;try{localStorage.setItem(K+'.d',v?'1':'0')}catch(e){}};
+async function backup(){
+  const s=JSON.stringify(db),name='gate-codes-backup.json';
+  try{
+    const f=new File([s],name,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'Gate Codes backup'});setDirty(false);msg='Backup shared. Make sure you chose Save to Files.';render();return}
+  }catch(e){if(e&&e.name==='AbortError')return}
+  try{const u=URL.createObjectURL(new Blob([s],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);setDirty(false);msg='Backup downloaded.'}catch(e){msg='Could not create a backup file. Use the text backup in Edit mode.'}
+  render();
+}
+const save=()=>{setDirty(true);const s=JSON.stringify(db);let a=false;try{localStorage.setItem(K,s);a=localStorage.getItem(K)===s}catch(e){}
+  idbPut(s).catch(()=>{if(!a){msg='This browser is not keeping data. Use Back up in Edit mode.';render()}})};
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+const SEED="ABE ABI ABQ ACA ACT AEX AGS AGU ALB ALO AMA ATL ATW AUS AVL AXA AZO BDL BFL BHM BIL BIS BMI BNA BOI BOS BPT BRO BTR BTV BUF BUR BWI CAE CAK CCS CHA CHS CID CLD CLE CLL CLT CMH CMI COS COU CRP CUU CVG CWA CZM DAY DCA DFW DOM DSM DTW ECP EIS ELP EUG EVV EYW FAR FAY FSD FSM FWA GCK GGG GHB GJT GNV GPT GRB GRI GRK GRR GSO GSP HDN HHH HOU HPN HRL HSV HUX IAH ICT ILM IND JAN JAX JFK LAN LAS LAW LBB LCH LFT LGA LIT LRD LSE LTO MAF MCI MCO MDT MEM MFE MFR MGM MHH MHK MHT MIA MID MKE MLI MLU MOB MQT MSN MSP MSY MTY MYR MZT NAS OKC OMA ORD ORF PHL PHX PIA PIT PNS PVD PWM RAP RDM RDU RIC RNO ROC ROW RST RTB SAT SAV SBA SBP SDF SEA SGF SHV SLC SPI SRQ STL STS TAM TLH TPA TRC TRI TUL TUS TVC TXK TYS VER VPS XNA YQB YUL YYZ ZCL ZIH".split(' ');
+const SEED_T={ABQ:"A,B,C",ALB:"A,B,C",ATL:"T,A,B,C,D,E,F",BDL:"A,B",BHM:"A,B,C",BNA:"A,B,C,D,T",BOI:"B,C",BOS:"A,B,C,E",BUR:"A,B",BWI:"A,B,C,D,E",CAK:"A",CHS:"A,B",CLE:"A,B,C",CLT:"A,B,C,D,E",CMH:"A,B,C",CVG:"A,B",CZM:"1",DAY:"A,B",DCA:"A,B,C,D,E",DFW:"A,B,C,D,E",DSM:"A,C",DTW:"A,B,C,D",ELP:"A,B",GRB:"A,B",GRR:"A,B",GSP:"A,B",IAH:"A,B,C,D,E",IND:"A,B",JAX:"A,C",JFK:"1,4,5,7,8",LAS:"A,B,C,D,E",LGA:"A,B,C",MCI:"A,B",MDT:"A,B,C",MEM:"B",MIA:"D,E,F,G,H,J",MKE:"C,D",MLI:"A,B",MSP:"A,B,C,D,E,F,G,H",MSY:"A,B,C",MTY:"A,B,C",MYR:"A,B",OMA:"A,B",ORD:"B,C,E,F,G,H,K,L,M",ORF:"A,B",PHL:"A,B,C,D,E,F",PHX:"A,B,C,D,E,F",PIT:"A,B,C,D",RDU:"A,C,D",RIC:"A,B",RNO:"B,C",ROC:"A,B",SAT:"A,B",SDF:"A,B",SEA:"A,B,C,D,N,S",SLC:"A,B",SRQ:"A,B",STL:"A,C,E",STS:"A,B",TPA:"A,C,E,F",TUL:"A,B",TUS:"A,B",VPS:"A,B,C",XNA:"A,B",YYZ:"1,3,A,B,C,D,E,F"};
+function seed(){
+  if(db.seeded&&db.termSeed===1)return;
+  const was=dirty;
+  if(!db.seeded){const have=new Set(db.airports.map(x=>x.name.toLowerCase()));SEED.forEach(c=>{if(!have.has(c.toLowerCase()))db.airports.push({id:uid(),name:c,lat:null,lng:null,terminals:[]})});db.seeded=true}
+  db.airports.forEach(a=>{const t=SEED_T[a.name.toUpperCase()];if(!t)return;t.split(',').forEach(n=>{n=n.trim();const nm='Terminal '+n,has=a.terminals.some(x=>{const l=x.name.toLowerCase();return l===nm.toLowerCase()||l===n.toLowerCase()});if(!has)a.terminals.push({id:uid(),name:nm,gates:[]})})});
+  db.termSeed=1;save();setDirty(was);render();
+}
+idbGet().then(v=>{if(v&&!db.airports.length){try{db=JSON.parse(v);render()}catch(e){}}}).catch(()=>{}).then(seed);
+setTimeout(seed,3000);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=s=>document.querySelector(s);
+const nat=(a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'});
+const km=(a,b,c,d)=>{const r=Math.PI/180,x=(c-a)*r,y=(d-b)*r,h=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return 12742*Math.asin(Math.sqrt(h))};
+
+function gps(ok,quiet){
+  if(!navigator.geolocation){msg='Location is not available here.';render();return}
+  busy=true;render();
+  navigator.geolocation.getCurrentPosition(p=>{busy=false;ok(p.coords)},e=>{busy=false;msg=quiet?'':'Location unavailable ('+(e.message||'permission denied')+'). Check Settings > Privacy > Location Services for Safari, or use the search bar.';render()},{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
+}
+function locate(quiet){
+  gps(c=>{
+    msg='';near=null;
+    db.airports.forEach(a=>{if(a.lat!=null){const d=km(c.latitude,c.longitude,a.lat,a.lng);if(!near||d<near.d)near={a,d}}});
+    if(auto&&near&&near.d<=10&&!S.a){S.a=near.a.id}
+    auto=false;render();
+  },quiet);
+}
+function cur(){
+  const A=db.airports.find(x=>x.id===S.a),T=A&&A.terminals.find(x=>x.id===S.t),G=T&&T.gates.find(x=>x.id===S.g);
+  return{A,T,G};
+}
+function render(){
+  const{A,T,G}=cur();let h='';
+  const home=!A;
+  h+=`<div class="top">${home?'<span></span>':'<button class="link" data-act="back">‹ Back</button>'}${G?'':`<button class="link" data-act="edit">${edit?'Done':'Edit'}</button>`}</div>`;
+  if(msg)h+=`<div class="msg">${esc(msg)}</div>`;
+  if(dirty&&db.airports.length)h+=`<div class="here">⚠️ Changes not backed up <button class="link" data-act="backup">Back up now</button></div>`;
+  if(home){
+    h+=`<h1>✈️ Gate Codes</h1><p class="sub">Stored only on this phone.</p>`;
+    if(busy)h+=`<div class="here">Finding your location…</div>`;
+    else if(near&&near.d<=10)h+=`<div class="here">📍 You're at <b>${esc(near.a.name)}</b> <button class="link" data-act="openA" data-id="${near.a.id}">Open</button></div>`;
+    else if(near)h+=`<div class="here">No saved airport nearby. Closest: ${esc(near.a.name)} (${(near.d*0.621).toFixed(0)} mi).</div>`;
+    h+=`<div class="row"><button data-act="loc">📍 Find my airport</button></div>`;
+    if(db.airports.length>1||q)h+=`<input id="q" type="search" placeholder="Search airports" value="${esc(q)}" autocomplete="off" autocapitalize="characters" style="margin-bottom:10px">`;
+    const all=[...db.airports].sort(nat),qq=q.trim().toLowerCase(),F=qq?all.filter(x=>x.name.toLowerCase().includes(qq)):all,L=F.slice(0,100);
+    h+='<div id="lst">';
+    if(!db.airports.length)h+=`<div class="empty">No airports yet. Tap Edit to add one.</div>`;
+    else if(!F.length)h+=`<div class="empty">No airports match "${esc(q)}".</div>`;
+    L.forEach(a=>{
+      h+=edit?`<div class="row"><input data-k="A" data-f="name" data-id="${a.id}" value="${esc(a.name)}"><button data-act="setloc" data-id="${a.id}">${a.lat!=null?'📍 Re-set':'📍 Set'}</button><button class="d" data-act="del" data-k="A" data-id="${a.id}">${delArm===a.id?'Delete?':'✕'}</button></div>`
+        :`<button class="item" data-act="openA" data-id="${a.id}"><span>${esc(a.name)}</span><small>${a.terminals.length} terminal${a.terminals.length==1?'':'s'}</small></button>`;
+    });
+    if(F.length>L.length)h+=`<div class="empty">Showing ${L.length} of ${F.length}. Keep typing to narrow the list.</div>`;
+    h+='</div>';
+    if(edit)h+=`<div class="box"><h3>Add airport</h3><div class="row"><input id="nm" placeholder="Airport name (e.g. DFW)"></div><div class="row"><button class="p" data-act="addAhere">Add here (saves GPS)</button><button data-act="addA">Add without GPS</button></div></div><div class="box"><h3>Add many airports</h3><p style="font-size:13px;color:var(--mu);margin:0 0 8px">Paste one airport per line. Duplicates are skipped.</p><textarea id="bulk" rows="4" placeholder="DFW&#10;ORD&#10;ATL"></textarea><div class="row" style="margin-top:8px"><button class="p" data-act="bulkadd">Add all</button></div></div><div class="box"><h3>Back up / restore</h3><div class="row"><button class="p" data-act="backup">Back up to Files</button></div><p style="font-size:13px;color:var(--mu);margin:0 0 8px">Tap Back up, then choose Save to Files. To restore, pick the saved file:</p><input type="file" id="rf" accept=".json,application/json"><details style="margin-top:10px"><summary style="color:var(--mu);font-size:14px">Backup as text instead</summary><textarea id="bk" rows="4" style="margin-top:8px">${esc(JSON.stringify(db))}</textarea><div class="row" style="margin-top:8px"><button data-act="restore">Restore from text</button></div></details></div>`;
+  }else if(!T){
+    h+=`<h1>${esc(A.name)}</h1><p class="sub">Select your terminal</p>`;
+    const L=[...A.terminals].sort(nat);
+    if(!L.length)h+=`<div class="empty">No terminals yet. Tap Edit to add one.</div>`;
+    L.forEach(t=>{
+      h+=edit?`<div class="row"><input data-k="T" data-f="name" data-id="${t.id}" value="${esc(t.name)}"><button class="d" data-act="del" data-k="T" data-id="${t.id}">${delArm===t.id?'Delete?':'✕'}</button></div>`
+        :`<button class="item" data-act="openT" data-id="${t.id}"><span>${esc(t.name)}</span><small>${t.gates.length} gate${t.gates.length==1?'':'s'}</small></button>`;
+    });
+    if(edit)h+=`<div class="box"><h3>Add terminal</h3><div class="row"><input id="nm" placeholder="Terminal name (e.g. Terminal A)"><button class="p" data-act="addT">Add</button></div></div>`;
+  }else if(!G){
+    h+=`<h1>${esc(T.name)}</h1><p class="sub">${esc(A.name)} · Select your gate</p>`;
+    const L=[...T.gates].sort(nat);
+    if(!L.length)h+=`<div class="empty">No gates yet. Tap Edit to add one.</div>`;
+    L.forEach(g=>{
+      h+=edit?`<div class="row"><input data-k="G" data-f="name" data-id="${g.id}" value="${esc(g.name)}" placeholder="Gate" style="flex:1"><input data-k="G" data-f="code" data-id="${g.id}" value="${esc(g.code)}" placeholder="Code" style="flex:1"><button class="d" data-act="del" data-k="G" data-id="${g.id}">${delArm===g.id?'Delete?':'✕'}</button></div>`
+        :`<button class="item" data-act="openG" data-id="${g.id}"><span>Gate ${esc(g.name)}</span><small>View code ›</small></button>`;
+    });
+    if(edit)h+=`<div class="box"><h3>Add gate</h3><div class="row"><input id="nm" placeholder="Gate (e.g. A12)"><input id="cd" placeholder="Gate code"></div><button class="p" data-act="addG">Add gate</button></div>`;
+  }else{
+    h+=`<div class="big"><div class="lbl">${esc(A.name)} · ${esc(T.name)}</div><h1>Gate ${esc(G.name)}</h1><div class="lbl">Gate code</div><div class="code">${G.code?esc(G.code):'—'}</div></div>`;
+  }
+  if(partial){const t=document.createElement('div');t.innerHTML=h;const n=t.querySelector('#lst'),o=$('#lst');if(n&&o){o.innerHTML=n.innerHTML;return}}
+  $('#app').innerHTML=h;
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]');if(!b)return;
+  const act=b.dataset.act,id=b.dataset.id,{A,T}=cur();msg='';if(act!=='del')delArm=null;
+  if(act==='back'){if(S.g)S.g=null;else if(S.t)S.t=null;else S.a=null;edit=false}
+  else if(act==='edit')edit=!edit;
+  else if(act==='loc'){auto=true;locate();return}
+  else if(act==='openA'){S.a=id;S.t=S.g=null;edit=false;q=''}
+  else if(act==='openT'){S.t=id;S.g=null;edit=false}
+  else if(act==='openG'){S.g=id;edit=false}
+  else if(act==='addA'||act==='addAhere'){
+    const n=$('#nm').value.trim();if(!n){msg='Enter an airport name first.';render();return}
+    const add=c=>{db.airports.push({id:uid(),name:n,lat:c?c.latitude:null,lng:c?c.longitude:null,terminals:[]});save();render()};
+    if(act==='addAhere'){gps(add);return}add(null);return;
+  }
+  else if(act==='setloc'){gps(c=>{const a=db.airports.find(x=>x.id===id);if(a){a.lat=c.latitude;a.lng=c.longitude;save();msg='Location saved for '+a.name+'.'}render()});return}
+  else if(act==='bulkadd'){const have=new Set(db.airports.map(x=>x.name.toLowerCase()));let n=0;$('#bulk').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).forEach(s=>{if(!have.has(s.toLowerCase())){have.add(s.toLowerCase());db.airports.push({id:uid(),name:s,lat:null,lng:null,terminals:[]});n++}});if(n)save();msg=n+' airport(s) added.'}
+  else if(act==='backup'){backup();return}
+  else if(act==='restore'){try{const d=JSON.parse($('#bk').value);if(!d||!Array.isArray(d.airports))throw 0;db=d;save();setDirty(false);msg='Restored.'}catch(e){msg='That text is not a valid backup.'}}
+  else if(act==='addT'){const n=$('#nm').value.trim();if(!n){msg='Enter a terminal name first.';render();return}A.terminals.push({id:uid(),name:n,gates:[]});save()}
+  else if(act==='addG'){const n=$('#nm').value.trim(),c=$('#cd').value.trim();if(!n){msg='Enter a gate name first.';render();return}T.gates.push({id:uid(),name:n,code:c});save()}
+  else if(act==='del'){
+    if(delArm!==id){delArm=id;render();return}
+    delArm=null;
+    const k=b.dataset.k;
+    if(k==='A')db.airports=db.airports.filter(x=>x.id!==id);
+    else if(k==='T')A.terminals=A.terminals.filter(x=>x.id!==id);
+    else T.gates=T.gates.filter(x=>x.id!==id);
+    save();
+  }
+  render();
+});
+document.addEventListener('change',e=>{
+  const i=e.target;if(i.id!=='rf'||!i.files[0])return;
+  const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!d||!Array.isArray(d.airports))throw 0;db=d;save();setDirty(false);S={a:null,t:null,g:null};msg='Restored '+d.airports.length+' airport(s).'}catch(x){msg='That file is not a valid backup.'}render()};
+  r.readAsText(i.files[0]);
+});
+document.addEventListener('change',e=>{
+  const i=e.target;if(!i.dataset.k)return;
+  const{A,T}=cur(),id=i.dataset.id;
+  const list=i.dataset.k==='A'?db.airports:i.dataset.k==='T'?A.terminals:T.gates;
+  const o=list.find(x=>x.id===id);if(o){o[i.dataset.f]=i.value.trim();save()}
+});
+document.addEventListener('input',e=>{if(e.target.id!=='q')return;q=e.target.value;partial=true;try{render()}finally{partial=false}});
+render();locate(true);
+</script></body></html>
